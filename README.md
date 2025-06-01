@@ -60,9 +60,6 @@ Inicia sesión con:
 # Ver contenedores en ejecución
 docker ps --filter name=nagios-test
 
-# Procesos clave dentro del contenedor
-docker exec -it nagios-test ps aux | grep -E "nagios|apache2"
-
 # Logs en tiempo real
 docker logs -f nagios-test
 ```
