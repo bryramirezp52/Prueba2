@@ -1,5 +1,3 @@
-# Instalación Nagios with Docker
-
 ## Prerrequisitos
 
 | Recurso       | Mínimo recomendado                                |
