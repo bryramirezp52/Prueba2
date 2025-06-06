@@ -15,7 +15,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     APACHE_RUN_DIR=/var/run/apache2 \
     APACHE_LOCK_DIR=/var/lock/apache2
 
-# 1) Instalación de dependencias de compilación y ejecución
+# 1) Dependencias
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         build-essential autoconf gcc pkg-config \
@@ -25,13 +25,12 @@ RUN apt-get update && \
         snmp libsnmp-dev wget ca-certificates unzip curl bc && \
     rm -rf /var/lib/apt/lists/*
 
-# 2) Creación de usuario y grupo para Nagios y configuración de permisos para Apache
+# 2) Usuario y grupo
 RUN groupadd -r ${NAGIOS_GROUP} || true && \
     useradd -r -g ${NAGIOS_GROUP} -d /usr/local/nagios -s /bin/false -c "Nagios User" ${NAGIOS_USER} || true && \
-    usermod -a -G ${NAGIOS_GROUP} ${APACHE_RUN_USER} || echo "Advertencia: No se pudo agregar ${APACHE_RUN_USER} al grupo ${NAGIOS_GROUP}"
+    usermod -a -G ${NAGIOS_GROUP} ${APACHE_RUN_USER} || true
 
-# 3) Compilación e instalación de Nagios Core
-# Instalamos Nagios, creamos usuarios, configuramos comando externo y habilitamos módulos de Apache.
+# 3) Compilar e instalar Nagios Core
 RUN cd /tmp && \
     wget -q https://github.com/NagiosEnterprises/nagioscore/archive/refs/tags/nagios-${NAGIOS_VERSION}.tar.gz && \
     tar xzf nagios-${NAGIOS_VERSION}.tar.gz && \
@@ -49,47 +48,43 @@ RUN cd /tmp && \
     make install-commandmode && \
     make install-config && \
     make install-webconf && \
-    a2enmod cgi alias authn_file auth_basic authz_core rewrite && \
-    echo "Nagios Core compilado e instalado."
+    a2enmod cgi alias authn_file auth_basic authz_core rewrite
 
-# 4) Compilación e instalación de los plugins de Nagios
+# 4) Desactivar sitio por defecto y redirigir “/” → “/nagios/”
+RUN a2dissite 000-default.conf && \
+    echo 'RedirectMatch ^/$ /nagios/' > /etc/apache2/conf-available/redirect-root.conf && \
+    a2enconf redirect-root
+
+# 5) Plugins de Nagios
 RUN cd /tmp && \
     wget -q https://nagios-plugins.org/download/nagios-plugins-${PLUGINS_VERSION}.tar.gz && \
     tar xzf nagios-plugins-${PLUGINS_VERSION}.tar.gz && \
     cd nagios-plugins-${PLUGINS_VERSION} && \
-    ./configure \
-        --with-nagios-user=${NAGIOS_USER} \
-        --with-nagios-group=${NAGIOS_GROUP} \
-        --with-perl=/usr/bin/perl && \
+    ./configure --with-nagios-user=${NAGIOS_USER} --with-nagios-group=${NAGIOS_GROUP} --with-perl=/usr/bin/perl && \
     make && \
-    make install && \
-    echo "Plugins de Nagios compilados e instalados."
+    make install
 
-# 5) Crear credenciales para la interfaz web de Nagios y ajustar permisos
+# 6) Credenciales + permisos
 RUN mkdir -p /usr/local/nagios/etc && \
     htpasswd -bc /usr/local/nagios/etc/htpasswd.users ${NAGIOS_USER} ${NAGIOS_PASS} && \
     chown ${NAGIOS_USER}:${NAGIOS_GROUP} /usr/local/nagios/etc/htpasswd.users && \
-    chmod 640 /usr/local/nagios/etc/htpasswd.users
-
-# 6) Ajustar permisos para el directorio de command file de Nagios
-# Nos aseguramos de que Apache (www-data) pueda escribir en /usr/local/nagios/var/rw
-RUN chown -R ${NAGIOS_USER}:${NAGIOS_GROUP} /usr/local/nagios/var/rw && \
+    chmod 640 /usr/local/nagios/etc/htpasswd.users && \
+    chown -R ${NAGIOS_USER}:${NAGIOS_GROUP} /usr/local/nagios/var/rw && \
     chmod -R g+rwx /usr/local/nagios/var/rw
 
-# 7) Limpieza de archivos temporales de compilación
+# 7) Limpiar tmp
 RUN rm -rf /tmp/*
 
-# 8) Exponer el puerto 80 para la interfaz web
+# 8) Exponer puerto 80
 EXPOSE 80
 
-# Establece un ServerName genérico para Apache y habilita la configuración
+# 9) ServerName para Apache
 RUN echo "ServerName localhost" > /etc/apache2/conf-available/servername.conf && \
     a2enconf servername
 
-# 9) Healthcheck para verificar que Nagios y Apache están funcionando
+# 10) Healthcheck básico
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s \
-    CMD curl -fs --user ${NAGIOS_USER}:${NAGIOS_PASS} http://localhost/nagios/ || exit 1
+  CMD curl -fs --user ${NAGIOS_USER}:${NAGIOS_PASS} http://localhost/nagios/ || exit 1
 
-    
-# 10) Comando de inicio del contenedor
+# 11) Lanzar Nagios + Apache (manteniendo advertencia leve de JSONArgs)
 CMD ["/bin/bash", "-c", "/usr/local/nagios/bin/nagios -v /usr/local/nagios/etc/nagios.cfg && /usr/local/nagios/bin/nagios -d /usr/local/nagios/etc/nagios.cfg && exec apache2ctl -D FOREGROUND"]
