@@ -88,5 +88,3 @@ docker rmi nagios-prueba2:latest
 ```
 
 ---
-
-¿Quieres que además te lo prepare como archivo `README.md` limpio para agregarlo directo a tu repositorio?
